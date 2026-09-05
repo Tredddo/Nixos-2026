@@ -1,0 +1,45 @@
+# BTRFS EMERGENCY SPACE RECOVERY CHEATSHEET
+# Use when rebuilds or commands fail with "No space left on device" on Btrfs.
+
+# 1. Check allocation status (look at "Device unallocated")
+sudo btrfs filesystem usage /
+
+# 2. Try lightweight balance first
+sudo btrfs balance start -dusage=0 /
+sudo btrfs balance start -dusage=5 /
+
+```Error
+ERROR: error during balancing '/': No space left on device
+There may be more info in syslog - try dmesg | tail
+```
+
+# 3. IF THE BALANCE FAILS ("No space left on device"), add a RAM-backed drive:
+# 3a. Allocate a 2GB file in RAM (/run has free memory)
+sudo truncate -s 2G /run/btrfs_temp.img
+
+# 3b. Attach the image to a loop device
+sudo losetup -f /run/btrfs_temp.img
+
+# 3c. Find the assigned loop name (e.g., /dev/loop0)
+losetup -a
+
+# 3d. Temporarily join the loop device to Btrfs pool
+sudo btrfs device add /dev/loop0 /
+
+# 4. Perform incremental balancing to reclaim empty chunks
+sudo btrfs balance start -dusage=5 /
+sudo btrfs balance start -dusage=15 /
+sudo btrfs balance start -dusage=25 /
+
+# 5. REMOVE the temporary RAM disk (CRITICAL: must be done before rebooting)
+sudo btrfs device remove /dev/loop0 /
+sudo losetup -d /dev/loop0
+sudo rm -f /run/btrfs_temp.img
+
+# 6. Verify only the physical drive remains and space is unallocated
+sudo btrfs filesystem show /
+sudo btrfs filesystem usage /
+
+# 7. Clean old Nix generations to prevent recurrence
+sudo nix-collect-garbage -d
+nix-store --optimise
